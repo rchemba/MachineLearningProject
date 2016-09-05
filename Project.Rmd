@@ -1,0 +1,201 @@
+---
+title: "Human Activity Recognition Exercise Prediction Report"
+author: "Chemba Ranganathan"
+date: "September 4, 2016"
+output: html_document
+---
+
+## Project Requirement
+The goal of this project is to use the Human Activity Recognition data and predict the manner in which they did the exercise. A training data set and a testing data set is available for the project and the "classe" variable in the training set is the variable that the project should predict. The prediction of "classe" can  use any of the other variables to predict with. The project will explain the details of building the model, cross validation used and the out of sample error.
+
+## Background
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+## Data
+
+The training data for this project are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+The data for this project comes from this source: http://groupware.les.inf.puc-rio.br/har. 
+
+## Retrieving data and importing it into R
+```{r warning=FALSE}
+
+library(curl)
+
+## Create a data directory
+    datadir <- "./data"
+    if (! file.exists(datadir)) {
+        dir.create(datadir) 
+    }
+## Download the file into a data directory
+trainingUrl <- 
+    "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+
+testingUrl <-
+    "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+if(!file.exists(paste0(datadir,"/pml-training.csv"))) {
+   download.file(url=trainingUrl, 
+                 destfile= paste0(datadir,"/pml-training.csv"),
+                 method="curl") 
+}
+
+ 
+origTrainingData <- read.csv(paste0(datadir,"/pml-training.csv"), 
+                             na.strings = c("NA", "#DIV/0!", ""), 
+                             header = TRUE)
+
+if(!file.exists(paste0(datadir, "/pml-testing.csv")))
+
+download.file(url=testingUrl, 
+              destfile = paste0(datadir, "/pml-testing.csv"),
+              method="curl")
+
+origTestingData <- read.csv(paste0(datadir, "/pml-testing.csv"), 
+                            na.strings = c("NA", "#DIV/0!", ""),
+                            header = TRUE)
+```
+## Load the required libraries
+
+```{r warning=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=80)}
+library(caret)
+library(rpart)
+library(rattle)
+```
+
+## Cleaning the data
+Clean the data and prepare the data set for creating prediction models
+
+1. Split the training set into two. One for training and the other to be used as a testing set to build the prediction model
+
+```{r}
+## Set the seed so that we can reproduce the tests
+set.seed(100)
+
+## Split the training data set into 2.
+
+splitTraningSet <- createDataPartition(origTrainingData$classe,
+p = 0.6, list = FALSE)
+
+projectTrainingData <- origTrainingData[splitTraningSet,]
+projectTestingData <- origTrainingData[-splitTraningSet,]
+
+```
+2. Predictor selection
+On inspecting the data we can see that the first six columns are just "id" columns and should not be used as predictors. Also the NA values cannot be used for training. So let us first remove these from the two sets creted using data partition.
+
+```{r tidy=TRUE, tidy.opts=list(width.cutoff=80)}
+
+## Remove the data containing NA vals before doing training
+all_zero_colnames <- sapply(names(origTestingData), 
+                            function(x) all(is.na(origTestingData[,x])==TRUE))
+nznames <- names(all_zero_colnames)[all_zero_colnames==FALSE]
+nznames <- nznames[-(1:7)]
+nznames <- nznames[1:(length(nznames)-1)]
+
+myTrainingData <- projectTrainingData[, c('classe', nznames)]
+myTestingData <- projectTestingData[, c('classe', nznames)]
+
+```
+3. Check for zero variance
+Let's make sure that we do not use any predictor that has zero variance
+```{r}
+## check for covariates that have virtually no variablility.
+nearZeroVariance <- nearZeroVar(myTrainingData, saveMetrics=TRUE)
+nearZeroVariance
+```
+The "nearZeroVariance" is FALSE for all the predictors which means that there are no covariates that have no variability. So now the data is clean and we can proceed to create the training model
+
+## Model Creation
+I have chosen the 3 most common methods used for prediction and narrow it down to one based on the accuracy.
+
+1.Decision trees with Classification and Regression Trees(CART) (method = rpart)
+2.Random Forest decision trees
+3. Stochastic gradient boosting trees (gbm)
+
+Let's use a common training control parameter and set the cross validation to 5 for all the 3 models which will make it easier to decide.
+```{r}
+controlParameter <- trainControl(method = 'cv', number = 5)
+```
+
+#### Decision tree with CART (method = rpart)
+```{r tidy=TRUE, tidy.opts=list(width.cutoff=80)}
+set.seed(200)
+rpartTraining <- train(classe ~ ., data = myTrainingData,
+                       method = "rpart", trControl = controlParameter)
+
+## Plot the data to see the decision tree
+fancyRpartPlot(rpartTraining$finalModel)
+
+## Predict using this model and check the overall accuracy
+predictionsRPart <- predict(rpartTraining, myTestingData)
+matrixRPart <- confusionMatrix(predictionsRPart, myTestingData$classe)
+matrixRPart$overall
+
+```
+
+#### Decision tree with Random Forest
+```{r tidy=TRUE, tidy.opts=list(width.cutoff=80)}
+set.seed(300)
+rfTraining <- train(classe ~ ., data=myTrainingData,
+                    method = "rf", trControl = controlParameter, ntree = 100)
+
+
+## Predict using this model and check the overall accuracy
+predictionsRF <- predict(rfTraining, myTestingData)
+matrixRF <- confusionMatrix(predictionsRF, myTestingData$classe)
+matrixRF$overall
+```
+
+#### Decision tree with Gradiant boosting tree (gbm)
+
+```{r warning = FALSE, message = FALSE , tidy=TRUE, tidy.opts=list(width.cutoff=80)}
+set.seed(400)
+gbmTraining <- invisible(train(classe ~ ., data=myTrainingData,
+                     method = "gbm", trControl = controlParameter, verbose=FALSE))
+
+predictionsGbm <- predict(gbmTraining, myTestingData)
+matrixGbm <- confusionMatrix(predictionsGbm, myTestingData$classe)
+matrixGbm$overall
+
+```
+
+From the 3 decision trees Random Forest trees seems to have the maximum accuracy while decision trees with CART(rpart) seems to have the lowest accuracy. So let's stick to random forest models. Since the trees are created at random let's check for a different selection of ntree and see whether this improves or reduces the accuracy. Also let's find the five important predictors chosen by the random forest model.
+
+```{r tidy=TRUE, tidy.opts=list(width.cutoff=80)}
+set.seed(500)
+rfTraining2 <- train(classe ~ ., data=myTrainingData,
+                    method = "rf", trControl = controlParameter, ntree = 500)
+
+
+## Predict using this model and check the overall accuracy
+predictionsRF2 <- predict(rfTraining2, myTestingData)
+matrixRF2 <- confusionMatrix(predictionsRF2, myTestingData$classe)
+matrixRF2$overall
+
+## Plot the predictors used in the order of importance
+varImpPlot(rfTraining$finalModel)
+varImpPlot(rfTraining2$finalModel)
+head(varImp(rfTraining$finalModel),5)
+head(varImp(rfTraining2$finalModel),5)
+
+```
+Based on the variable importance we can conclude that the most important predictors are roll_belt, pitch_belt, yaw_belt, total_accel_belt and gyros_belt_x features.
+
+## Out of Sample error
+The random forest model with ntree = 500 seems to have the lowest error of 0.0088 
+
+## Predictions of the actual testing data
+```{r tidy=TRUE, tidy.opts=list(width.cutoff=80)}
+predictionResults <- predict(rfTraining2, origTestingData)
+predictionResults
+```
+
+##Conclusion
+For this project data the "Random Forest" decision model based prediction model seems to be the most accurate (by checking the overall accuracy using confusion matrix).
+
